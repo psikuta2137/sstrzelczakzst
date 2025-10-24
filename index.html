@@ -1,0 +1,130 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Player — lokalny</title>
+<style>
+  html,body{height:100%;margin:0;font-family:system-ui,Segoe UI,Roboto,Arial}
+  .wrap{display:flex;flex-direction:column;height:100%}
+  header{padding:.6rem;background:#111;color:#fff}
+  main{flex:1;display:flex;align-items:center;justify-content:center;padding:1rem}
+  video{max-width:100%;max-height:80vh;background:#000;display:block}
+  .controls{padding:.6rem;display:flex;gap:.5rem;align-items:center}
+  .big{font-size:1.05rem}
+  #drop{border:2px dashed #888;padding:1rem;text-align:center;border-radius:6px}
+  .error{color:#c33}
+</style>
+
+<div class="wrap">
+  <header>
+    <strong>Player lokalny</strong> — jeśli nic nie gra, wybierz plik lub uruchom serwer (instrukcje poniżej).
+  </header>
+
+  <main>
+    <div id="holder" style="width:100%;max-width:900px">
+      <div id="drop">
+        <div class="big">Przeciągnij i upuść plik wideo tutaj albo wybierz z dysku</div>
+        <div style="margin-top:.6rem">
+          <input id="file" type="file" accept="video/*">
+          <button id="tryLocal">Spróbuj załadować ./film.mp4</button>
+        </div>
+        <div id="msg" style="margin-top:.6rem"></div>
+      </div>
+
+      <div style="margin-top:.8rem">
+        <video id="vid" controls></video>
+      </div>
+
+      <div class="controls">
+        <span id="info">Brak pliku</span>
+        <span style="flex:1"></span>
+        <span class="error" id="err"></span>
+      </div>
+    </div>
+  </main>
+
+  <footer style="padding:.6rem;font-size:.85rem;background:#f3f3f3">
+    Jeśli film nie działa: 1) sprawdź nazwę — zmień na <code>film.mp4</code>, 2) uruchom prosty serwer: <code>python -m http.server 8000</code> w tym folderze i otwórz <code>http://localhost:8000</code>, 3) możliwe, że kodek to HEVC/H.265 — skonwertuj ffmpeg (patrz niżej).
+    <div style="margin-top:.4rem">Konwersja (jeśli potrzebna): <code>ffmpeg -i input.mkv -c:v libx264 -crf 20 -c:a aac output.mp4</code></div>
+  </footer>
+</div>
+
+<script>
+const fileInput = document.getElementById('file');
+const vid = document.getElementById('vid');
+const msg = document.getElementById('msg');
+const err = document.getElementById('err');
+const info = document.getElementById('info');
+const tryLocal = document.getElementById('tryLocal');
+const drop = document.getElementById('drop');
+
+function logInfo(s){ info.textContent = s; console.log('[player] '+s); }
+function logErr(s){ err.textContent = s; console.error('[player] '+s); }
+
+function playBlob(url, name){
+  vid.src = url;
+  vid.load();
+  vid.play().then(()=>{}).catch(e=>{ /* autoplay blocked maybe */ });
+  logInfo('Odtwarzanie: ' + (name||url));
+  err.textContent = '';
+}
+
+// drag & drop
+;['dragenter','dragover'].forEach(ev=> drop.addEventListener(ev, e=>{ e.preventDefault(); drop.style.borderColor='#4a90e2'; }));
+;['dragleave','drop'].forEach(ev=> drop.addEventListener(ev, e=>{ drop.style.borderColor='#888'; }));
+drop.addEventListener('drop', e=>{
+  e.preventDefault();
+  const f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if(!f) return;
+  const url = URL.createObjectURL(f);
+  playBlob(url, f.name);
+});
+
+// file input
+fileInput.addEventListener('change', e=>{
+  const f = e.target.files && e.target.files[0];
+  if(!f) return;
+  playBlob(URL.createObjectURL(f), f.name);
+});
+
+// try load ./film.mp4 (works best when served via http server; file:// may be restricted)
+tryLocal.addEventListener('click', async ()=>{
+  const candidate = 'film.mp4';
+  try {
+    // If page opened via file:// fetch may fail — try setting src directly anyway
+    if(location.protocol === 'file:'){
+      vid.src = candidate;
+      vid.load();
+      logInfo('Próba odtworzenia local file: ' + candidate + ' (jeśli przeglądarka pozwala)');
+      return;
+    }
+    // if served over http, try HEAD first
+    const r = await fetch(candidate, {method:'HEAD'});
+    if(!r.ok){ throw new Error('Brak pliku ./film.mp4 — status ' + r.status); }
+    playBlob(candidate, candidate);
+  } catch (e){
+    logErr('Nie udało się załadować ./film.mp4 — wybierz plik ręcznie. ('+e.message+')');
+    // as fallback try direct assignment
+    vid.src = candidate;
+    vid.load();
+  }
+});
+
+// show decoding errors
+vid.addEventListener('error', ()=>{
+  const e = vid.error;
+  if(!e) return;
+  let text = '';
+  switch(e.code){
+    case 1: text = 'MEDIA_ERR_ABORTED — odtworzenie przerwane.'; break;
+    case 2: text = 'MEDIA_ERR_NETWORK — błąd sieci.'; break;
+    case 3: text = 'MEDIA_ERR_DECODE — dekodowanie nie powiodło się (prawd. nieobsługiwany kodek).'; break;
+    case 4: text = 'MEDIA_ERR_SRC_NOT_SUPPORTED — format nieobsługiwany.'; break;
+    default: text = 'Nieznany błąd w odtwarzaczu.';
+  }
+  logErr(text);
+});
+
+// info when metadata loaded
+vid.addEventListener('loadedmetadata', ()=>{
+  logInfo('Rozdzielczość: ' + vid.videoWidth + 'x' + vid.videoHeight + ', długość: ' + Math.round(vid.duration) + 's');
+});
+</script>
